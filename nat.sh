@@ -338,11 +338,27 @@ LINE
     sleep 1
 }
 
+ensureNftTables(){
+    nft list table ip nat &> /dev/null
+    if [ $? -ne 0 ]; then
+        nft add table ip nat
+    fi
+    nft list chain ip nat prerouting &> /dev/null
+    if [ $? -ne 0 ]; then
+        nft add chain ip nat prerouting { type nat hook prerouting priority -100\; }
+    fi
+    nft list chain ip nat postrouting &> /dev/null
+    if [ $? -ne 0 ]; then
+        nft add chain ip nat postrouting { type nat hook postrouting priority 100\; }
+    fi
+}
+
 clearDnat(){
     echo -ne " ${WARN} ${RED}确定要清空所有转发规则吗？[y/N]: ${PLAIN}"
     read confirm
     if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
         > $conf
+        ensureNftTables
         nft flush chain ip nat prerouting
         nft flush chain ip nat postrouting
         echo "" > /nftables_nat.sh_tmp
@@ -375,6 +391,7 @@ lsDnat(){
 
 show_nftables() {
     clear
+    ensureNftTables
     echo -e "${CYAN}========== nftables PREROUTING 链 (流入) ==========${PLAIN}"
     nft list chain ip nat prerouting
     echo ""
