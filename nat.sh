@@ -25,7 +25,7 @@ touch $conf
 show_header() {
     clear
     echo -e "${CYAN}╔===============================================================╗${PLAIN}"
-    echo -e "${CYAN}║${PLAIN} ${BOLD}${PURPLE} 🚀 IPTables NAT 端口转发高级管理工具 (增强炫彩版)       ${PLAIN}${CYAN}║${PLAIN}"
+    echo -e "${CYAN}║${PLAIN} ${BOLD}${PURPLE} 🚀 nftables NAT 端口转发高级管理工具 (增强炫彩版)       ${PLAIN}${CYAN}║${PLAIN}"
     echo -e "${CYAN}║${PLAIN} ${YELLOW} 特性: 支持单端口 / 自定义端口段 / 智能防冲突 / 一键清理 ${PLAIN}${CYAN}║${PLAIN}"
     echo -e "${CYAN}║${PLAIN} ${CYAN} Based on Arloor | Modified for Perfect Range Forwarding ${PLAIN}${CYAN}║${PLAIN}"
     echo -e "${CYAN}╚===============================================================╝${PLAIN}"
@@ -41,16 +41,39 @@ base=/etc/dnat
 mkdir -p $base 2>/dev/null
 conf=$base/conf
 firstAfterBoot=1
-lastConfig="/iptables_nat.sh"
-lastConfigTmp="/iptables_nat.sh_tmp"
+lastConfig="/nftables_nat.sh"
+lastConfigTmp="/nftables_nat.sh_tmp"
 
 ####
 echo "正在安装依赖...."
-yum install -y bind-utils &> /dev/null
-apt install -y dnsutils &> /dev/null
+yum install -y bind-utils nftables &> /dev/null
+apt install -y dnsutils nftables &> /dev/null
 echo "Completed：依赖安装完毕"
 echo ""
 ####
+ensureNftTables(){
+    nft list table ip nat &> /dev/null
+    if [ $? -ne 0 ]; then
+        nft add table ip nat
+    fi
+    nft list chain ip nat prerouting &> /dev/null
+    if [ $? -ne 0 ]; then
+        nft add chain ip nat prerouting { type nat hook prerouting priority -100 \; }
+    fi
+    nft list chain ip nat postrouting &> /dev/null
+    if [ $? -ne 0 ]; then
+        nft add chain ip nat postrouting { type nat hook postrouting priority 100 \; }
+    fi
+    nft list table ip filter &> /dev/null
+    if [ $? -ne 0 ]; then
+        nft add table ip filter
+    fi
+    nft list chain ip filter forward &> /dev/null
+    if [ $? -ne 0 ]; then
+        nft add chain ip filter forward { type filter hook forward priority 0 \; policy accept \; }
+    fi
+}
+
 turnOnNat(){
     echo "1. 端口转发开启  【成功】"
     sed -n '/^net.ipv4.ip_forward=1/'p /etc/sysctl.conf | grep -q "net.ipv4.ip_forward=1"
@@ -58,16 +81,8 @@ turnOnNat(){
         echo -e "net.ipv4.ip_forward=1" >> /etc/sysctl.conf && sysctl -p
     fi
 
-    echo "2. 开放iptbales中的FORWARD链  【成功】"
-    arr1=(`iptables -L FORWARD -n  --line-number |grep "REJECT"|grep "0.0.0.0/0"|sort -r|awk '{print $1,$2,$5}'|tr " " ":"|tr "\n" " "`)  
-    for cell in ${arr1[@]}
-    do
-        arr2=(`echo $cell|tr ":" " "`)  
-        index=${arr2[0]}
-        echo 删除禁止FOWARD的规则$index
-        iptables -D FORWARD $index
-    done
-    iptables --policy FORWARD ACCEPT
+    echo "2. 确保nftables nat表和链就绪  【成功】"
+    ensureNftTables
 }
 turnOnNat
 
@@ -85,16 +100,15 @@ dnat(){
         local localport=$1
         local remote=$2
         local remoteport=$3
-        
-        # 【核心修复区】：保留替换逻辑，解决范围转发不通的问题
-        local ipt_dport=${localport//-/:}
+
+        local nft_dport=${localport//-/:}
         local snat_dport=${remoteport//-/:}
 
         cat >> $lastConfigTmp <<EOF
-iptables -t nat -A PREROUTING -p tcp --dport $ipt_dport -j DNAT --to-destination $remote:$remoteport
-iptables -t nat -A PREROUTING -p udp --dport $ipt_dport -j DNAT --to-destination $remote:$remoteport
-iptables -t nat -A POSTROUTING -p tcp -d $remote --dport $snat_dport -j SNAT --to-source $localIP
-iptables -t nat -A POSTROUTING -p udp -d $remote --dport $snat_dport -j SNAT --to-source $localIP
+nft add rule ip nat prerouting tcp dport $nft_dport dnat to $remote:$remoteport
+nft add rule ip nat prerouting udp dport $nft_dport dnat to $remote:$remoteport
+nft add rule ip nat postrouting ip daddr $remote tcp dport $snat_dport snat to $localIP
+nft add rule ip nat postrouting ip daddr $remote udp dport $snat_dport snat to $localIP
 EOF
     }
 }
@@ -125,14 +139,14 @@ echo "3. 开始监听域名解析变化"
 echo ""
 while true ;
 do
-localIP=$(ip -o -4 addr list | grep -Ev '\s(docker|lo)' | awk '{print $4}' | cut -d/ -f1 | grep -Ev '(^127\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$)|(^10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$)|(^172\.1[6-9]{1}[0-9]{0,1}\.[0-9]{1,3}\.[0-9]{1,3}$)|(^172\.2[0-9]{1}[0-9]{0,1}\.[0-9]{1,3}\.[0-9]{1,3}$)|(^172\.3[0-1]{1}[0-9]{0,1}\.[0-9]{1,3}\.[0-9]{1,3}$)|(^192\.168\.[0-9]{1,3}\.[0-9]{1,3}$)')
+localIP=$(ip -o -4 addr list | grep -Ev '\s(docker|lo)' | awk '{print $4}' | cut -d/ -f1 | grep -Ev '(^127\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$)|(^10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$)|(^172\.1[6-9]{1}[0-9]{0,1}\.[0-9]{1,3}\.[0-9]{1,3}$)|(^172\.2[0-9]{1}[0-9]{0,1}\.[0-9]{1,3}\.[0-9]{1,3}$)|(^172\.3[0-1]{1}[0-9]{0,1}\.[0-9]{1,3}\.[0-9]{1,3}$)|(^192\.168\.[0-9]{1,3}\.[0-9]{1,3}$)')
 if [ "${localIP}" = "" ]; then
         localIP=$(ip -o -4 addr list | grep -Ev '\s(docker|lo)' | awk '{print $4}' | cut -d/ -f1|head -n 1 )
 fi
 echo  "本机网卡IP [$localIP]"
 cat > $lastConfigTmp <<EOF
-iptables -t nat -F PREROUTING
-iptables -t nat -F POSTROUTING
+nft flush chain ip nat prerouting
+nft flush chain ip nat postrouting
 EOF
 arr1=(`cat $conf`)
 for cell in ${arr1[@]}
@@ -147,12 +161,12 @@ done
 lastConfigTmpStr=`cat $lastConfigTmp`
 lastConfigStr=`cat $lastConfig`
 if [ "$firstAfterBoot" = "1" -o "$lastConfigTmpStr" != "$lastConfigStr" ];then
-    echo '更新iptables规则[DOING]'
+    echo '更新nftables规则[DOING]'
     source $lastConfigTmp
     cat $lastConfigTmp > $lastConfig
-    echo '更新iptables规则[DONE]'
+    echo '更新nftables规则[DONE]'
 else
- echo "iptables规则未变更"
+ echo "nftables规则未变更"
 fi
 
 firstAfterBoot=0
@@ -163,7 +177,7 @@ AAAA
 
 cat > /lib/systemd/system/dnat.service <<\EOF
 [Unit]
-Description=动态设置iptables转发规则
+Description=动态设置nftables转发规则
 After=network-online.target
 Wants=network-online.target
 
@@ -224,7 +238,6 @@ addDnat(){
     echo -ne " ${CYAN}请输入目标域名或IP地址:${PLAIN} " 
     read remotehost
 
-    # 校验输入
     echo "$localport"|[ -n "`sed -n '/^[0-9-][0-9-]*$/p'`" ] && echo $remoteport |[ -n "`sed -n '/^[0-9-][0-9-]*$/p'`" ]||{
         echo -e " ${ERROR} ${RED}端口格式输入有误，必须是数字或范围！${PLAIN}"
         sleep 2
@@ -330,9 +343,9 @@ clearDnat(){
     read confirm
     if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
         > $conf
-        iptables -t nat -F PREROUTING
-        iptables -t nat -F POSTROUTING
-        echo "" > /iptables_nat.sh_tmp 
+        nft flush chain ip nat prerouting
+        nft flush chain ip nat postrouting
+        echo "" > /nftables_nat.sh_tmp
         echo -e " ${SUCCESS} ${GREEN}所有规则已彻底清空！${PLAIN}"
         setupService
     else
@@ -360,13 +373,13 @@ lsDnat(){
     read
 }
 
-show_iptables() {
+show_nftables() {
     clear
-    echo -e "${CYAN}========== IPTables PREROUTING 链 (流入) ==========${PLAIN}"
-    iptables -L PREROUTING -n -t nat --line-number
+    echo -e "${CYAN}========== nftables PREROUTING 链 (流入) ==========${PLAIN}"
+    nft list chain ip nat prerouting
     echo ""
-    echo -e "${CYAN}========== IPTables POSTROUTING 链 (流出) ==========${PLAIN}"
-    iptables -L POSTROUTING -n -t nat --line-number
+    echo -e "${CYAN}========== nftables POSTROUTING 链 (流出) ==========${PLAIN}"
+    nft list chain ip nat postrouting
     echo ""
     echo -ne " ${INFO} ${GREEN}按回车键返回菜单...${PLAIN}"
     read
@@ -378,10 +391,10 @@ while true; do
     echo -e " ${CYAN}请选择操作 (输入数字并回车):${PLAIN}"
     echo ""
     echo -e "  ${GREEN}1.${PLAIN} ➕ 增加转发规则"
-    echo -e "  ${GREEN}2.${PLAIN} ✏️ 修改转发规则"
+    echo -e "  ${GREEN}2.${PLAIN} ✏️  修改转发规则"
     echo -e "  ${GREEN}3.${PLAIN} ➖ 删除转发规则"
     echo -e "  ${GREEN}4.${PLAIN} 📄 列出当前规则"
-    echo -e "  ${GREEN}5.${PLAIN} 🔍 查看底层 IPTables 状态"
+    echo -e "  ${GREEN}5.${PLAIN} 🔍 查看底层 nftables 状态"
     echo -e "  ${RED}6.${PLAIN} 🗑️  一键清空所有规则"
     echo -e "  ${YELLOW}0.${PLAIN} 🚪 退出脚本"
     echo ""
@@ -406,7 +419,7 @@ while true; do
             lsDnat
             ;;
         5)
-            show_iptables
+            show_nftables
             ;;
         6)
             echo ""
