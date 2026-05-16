@@ -193,6 +193,7 @@ WantedBy=multi-user.target
 EOF
 
 ln -sf "$(readlink -f "$0")" /usr/local/bin/ipt
+ln -sf "$(readlink -f "$0")" /usr/local/bin/kk
     systemctl daemon-reload
 systemctl enable dnat > /dev/null 2>&1
 service dnat stop > /dev/null 2>&1
@@ -389,19 +390,6 @@ lsDnat(){
     read
 }
 
-show_nftables() {
-    clear
-    ensureNftTables
-    echo -e "${CYAN}========== nftables PREROUTING 链 (流入) ==========${PLAIN}"
-    nft list chain ip nat prerouting
-    echo ""
-    echo -e "${CYAN}========== nftables POSTROUTING 链 (流出) ==========${PLAIN}"
-    nft list chain ip nat postrouting
-    echo ""
-    echo -ne " ${INFO} ${GREEN}按回车键返回菜单...${PLAIN}"
-    read
-}
-
 # ================= 主循环 =================
 while true; do
     show_header
@@ -411,11 +399,10 @@ while true; do
     echo -e "  ${GREEN}2.${PLAIN} ✏️  修改转发规则"
     echo -e "  ${GREEN}3.${PLAIN} ➖ 删除转发规则"
     echo -e "  ${GREEN}4.${PLAIN} 📄 列出当前规则"
-    echo -e "  ${GREEN}5.${PLAIN} 🔍 查看底层 nftables 状态"
-    echo -e "  ${RED}6.${PLAIN} 🗑️  一键清空所有规则"
+    echo -e "  ${RED}5.${PLAIN} 🗑️  一键清空所有规则"
     echo -e "  ${YELLOW}0.${PLAIN} 🚪 退出脚本"
     echo ""
-    echo -ne " ${CYAN}请输入选项 [0-6]:${PLAIN} "
+    echo -ne " ${CYAN}请输入选项 [0-5]:${PLAIN} "
     read opt
 
     case $opt in
@@ -436,9 +423,6 @@ while true; do
             lsDnat
             ;;
         5)
-            show_nftables
-            ;;
-        6)
             echo ""
             clearDnat
             ;;
