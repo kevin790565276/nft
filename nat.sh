@@ -21,6 +21,30 @@ mkdir -p $base 2>/dev/null
 conf=$base/conf
 touch $conf
 
+# --- 初始化安装检查 ---
+install_shortcut() {
+    if [ ! -f /usr/local/bin/kk ]; then
+        echo -e " ${INFO} ${CYAN}正在安装快捷命令...${PLAIN}"
+        ln -sf "$(readlink -f "$0")" /usr/local/bin/kk
+        ln -sf "$(readlink -f "$0")" /usr/local/bin/ipt
+        echo -e " ${SUCCESS} ${GREEN}快捷命令安装完成，输入 kk 即可启动工具${PLAIN}"
+        
+        echo -e " ${INFO} ${CYAN}正在安装依赖 (nftables)...${PLAIN}"
+        yum install -y bind-utils nftables &> /dev/null
+        apt install -y dnsutils nftables &> /dev/null
+        echo -e " ${SUCCESS} ${GREEN}依赖安装完成${PLAIN}"
+        
+        echo -e " ${INFO} ${CYAN}正在配置开机自启...${PLAIN}"
+        setupService
+        echo -e " ${SUCCESS} ${GREEN}开机自启配置完成${PLAIN}"
+        echo ""
+        sleep 1
+    fi
+}
+
+# 首次运行时自动安装
+install_shortcut
+
 # --- 炫彩 Header ---
 show_header() {
     clear
