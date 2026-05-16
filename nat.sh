@@ -24,9 +24,11 @@ touch $conf
 # --- 初始化安装检查 ---
 install_shortcut() {
     if [ ! -f /usr/local/bin/kk ]; then
+        local CURRENT_SCRIPT
+        CURRENT_SCRIPT=$(readlink -f "$0")
         echo -e " ${INFO} ${CYAN}正在安装快捷命令...${PLAIN}"
-        ln -sf "$(readlink -f "$0")" /usr/local/bin/kk
-        ln -sf "$(readlink -f "$0")" /usr/local/bin/ipt
+        ln -sf "$CURRENT_SCRIPT" /usr/local/bin/kk
+        ln -sf "$CURRENT_SCRIPT" /usr/local/bin/ipt
         echo -e " ${SUCCESS} ${GREEN}快捷命令安装完成，输入 kk 即可启动工具${PLAIN}"
         
         echo -e " ${INFO} ${CYAN}正在安装依赖 (nftables)...${PLAIN}"
@@ -41,9 +43,6 @@ install_shortcut() {
         sleep 1
     fi
 }
-
-# 首次运行时自动安装
-install_shortcut
 
 # --- 炫彩 Header ---
 show_header() {
@@ -216,12 +215,10 @@ RestartSec=30
 WantedBy=multi-user.target
 EOF
 
-ln -sf "$(readlink -f "$0")" /usr/local/bin/ipt
-ln -sf "$(readlink -f "$0")" /usr/local/bin/kk
     systemctl daemon-reload
-systemctl enable dnat > /dev/null 2>&1
-service dnat stop > /dev/null 2>&1
-service dnat start > /dev/null 2>&1
+    systemctl enable dnat > /dev/null 2>&1
+    service dnat stop > /dev/null 2>&1
+    service dnat start > /dev/null 2>&1
 }
 
 
@@ -414,7 +411,12 @@ lsDnat(){
     read
 }
 
-# ================= 主循环 =================
+# ================= 主控制流程 =================
+
+# 首次运行、或者检测不到快捷键时，自动安装命令和依赖
+install_shortcut
+
+# 进入前端菜单主循环
 while true; do
     show_header
     echo -e " ${CYAN}请选择操作 (输入数字并回车):${PLAIN}"
